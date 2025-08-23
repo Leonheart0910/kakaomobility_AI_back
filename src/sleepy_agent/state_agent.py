@@ -21,8 +21,10 @@ class AgentState(StateGraph):
     # 운전 맥락 정보
     # driving_context: DrivingContext
 
+    # 계산된 졸음 위험도 점수 (라우팅의 기준)
     drowsiness_score: Optional[int]
-
+    
+    # 졸음 점수를 산출한 근거 (디버깅 및 설명 용도)
     analysis_rationale: Optional[str]
 
 
