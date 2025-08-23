@@ -20,6 +20,14 @@ load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
 model = ChatGoogleGenerativeAI(
     # model="gemini-2.5-flash-lite-preview-06-17",
+    model = "gemini-2.5-flash-lite-preview-06-17",
+    api_key=API_KEY,
+    temperature=0.7,
+    # convert_system_message_to_human=True,
+)
+
+model1 = ChatGoogleGenerativeAI(
+    # model="gemini-2.5-flash-lite-preview-06-17",
     model = "gemini-2.5-flash",
     api_key=API_KEY,
     temperature=0.7,
@@ -33,7 +41,7 @@ lite_model = ChatGoogleGenerativeAI(
     # convert_system_message_to_human=True,
 )
 
-linguistic_fatigue_analysis_model = model.with_structured_output(LinguisticFatigueAnalysis)
+linguistic_fatigue_analysis_model = model1.with_structured_output(LinguisticFatigueAnalysis)
 
 
 def analyze_user_agent(state: AgentState) -> AgentState:
@@ -202,7 +210,7 @@ def validate_quiz_answer_node(state: AgentState) -> AgentState:
     quiz_context = state["quiz_context"]
     quiz_timestamp_str = state["quiz_timestamp"]
 
-    validation_model = model.with_structured_output(QuizValidationResult)
+    validation_model = model1.with_structured_output(QuizValidationResult)
     validation_prompt = ChatPromptTemplate.from_messages([
         ("system", 
          "너는 '밀짚모자 루피'다! 동료(사용자)가 낸 퀴즈 답변을 채점해줘. "
@@ -246,7 +254,7 @@ def cognitive_intervention_node(state: AgentState) -> AgentState:
     state = summarize_messages_if_needed(state)
     messages = state.get("messages")
     # 퀴즈 생성을 위한 Pydantic 모델 및 모델 체인
-    quiz_model = model.with_structured_output(Quiz)
+    quiz_model = model1.with_structured_output(Quiz)
     # quiz_generation_prompt = ChatPromptTemplate.from_template(
     #     "운전자의 정신을 환기시킬 수 있는 간단한 운전자의 기억 기반 퀴즈를 하나만 내주세요. "
     #     "운전자가 되도록이면 길고 성실하게 답변할 수 있는 퀴즈를 내세요."
