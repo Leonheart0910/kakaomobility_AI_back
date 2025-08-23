@@ -1,4 +1,5 @@
-from typing import Annotated, Dict, Any, TypedDict, Optional
+from typing import Annotated, Dict, Any, TypedDict, Optional, List
+from pydantic import BaseModel, Field
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, START, END
 
@@ -25,3 +26,14 @@ class AgentState(StateGraph):
     analysis_rationale: Optional[str]
 
 
+class LinguisticFatigueAnalysis(BaseModel):
+    """
+    사용자 발화의 언어적 특징을 분석하여 피로도를 측정하기 위한 스키마입니다.
+    """
+    
+    linguistic_features: List[str] = Field(
+        description="피로 상태로 판단할 수 있는 관찰된 언어적 특징들의 목록. 예: ['단답형 대답', '느린 응답 속도', '횡설수설']"
+    )
+    reasoning: str = Field(
+        description="위 언어적 특징들이 왜 피로의 신호가 되는지에 대한 논리적인 근거."
+    )
