@@ -29,9 +29,6 @@ lite_model = ChatGoogleGenerativeAI(
 
 linguistic_fatigue_analysis_model = model.with_structured_output(LinguisticFatigueAnalysis)
 
-def answer_user_question(state: AgentState) -> AgentState:
-    
-    return {}
 
 def analyze_user_agent(state: AgentState) -> AgentState:
 
@@ -52,7 +49,10 @@ def analyze_user_agent(state: AgentState) -> AgentState:
     chain = prompt | linguistic_fatigue_analysis_model
     result = chain.invoke({"user_text":user_text})
 
-    return {"linguistic_fatigue_analysis": result.model_dump()}
+    return {
+        "linguistic_fatigue_analysis": result.model_dump(),
+        "last_interaction_time": datetime.now(timezone.utc).isoformat()
+    }
 
 
 def route_after_analysis(state: AgentState):
@@ -131,13 +131,16 @@ def safe_navigation_node(state: AgentState) -> AgentState:
     
     # 2. 사용자에게 전달할 메시지 생성
     message_text = (
-        "운전자님의 안전을 위해 즉시 휴식이 필요합니다. "
-        f"가장 가까운 휴식 장소는 **{rest_area_info}**입니다. "
-        "그 장소에서 쉬었다 가시는 건 어때요?"
+        "어이, 동료. 지금은 쉴 때다. "
+        f"해적왕이 될 내 동료가... 졸음 따위에게 질 수는 없잖아! "
+        f"저기 **{rest_area_info}**에서 일단 멈춘다. 우리의 모험은 아직 끝나지 않았으니까! 알겠지?"
     )
     
     # 3. 생성된 메시지를 messages에 추가
-    return {"messages": [AIMessage(content=message_text)]}
+    return {
+        "messages": [AIMessage(content=message_text)],
+        "last_interaction_time": datetime.now(timezone.utc).isoformat()
+    }
 
 
 def conversation_node(state: AgentState) -> AgentState:
@@ -152,17 +155,23 @@ def conversation_node(state: AgentState) -> AgentState:
     print("response \n\n", response ,"\n\n")
     
     # 3. 생성된 응답을 messages에 추가하여 반환
-    return {"messages": [AIMessage(content=response.content)]}
+    return {"messages": [response], "last_interaction_time": datetime.now(timezone.utc).isoformat()}
 
 def entry_router_node(state: AgentState):
     """그래프의 진입점에서 퀴즈 상황인지 일반 대화인지 판단하여 분기합니다."""
-    print("quiz_context", state.get("quiz_context"))
+    # print("quiz_context", state.get("quiz_context"))
     # 상태에 quiz_context가 있는지 확인
+    user_text = state.get("messages", [])[-1].content
+
+    if user_text == "[USER_IS_SILENT]":
+        print("--- 상태: 사용자 침묵 감지 ---")
+        return "proactive_conversation_node"
+    
     if state.get("quiz_context"):
         print("--- 상태: 퀴즈 답변 처리 ---")
         return "validate_quiz_answer_node" # 퀴즈 검증 노드로 이동
     
-    user_text = state.get("messages", [])[-1].content
+    
     
     intent_prompt = ChatPromptTemplate.from_messages([
         ("system", 
@@ -207,7 +216,7 @@ def validate_quiz_answer_node(state: AgentState) -> AgentState:
     
     if (datetime.now(timezone.utc) - quiz_time).total_seconds() > TIMEOUT_SECONDS:
         print(f"!!! {TIMEOUT_SECONDS}초 이상 응답 지연, 심각한 졸음으로 판단 !!!")
-        feedback_message = AIMessage(content="괜찮으신가요? 응답이 없으셔서 걱정됩니다. 가까운 곳에서 꼭 쉬어가세요.")
+        feedback_message = AIMessage(content="야!! 대답해! 괜찮은거 맞지?")
     else:
         # 2. LLM을 이용한 유연한 채점
         user_answer = state.get("messages", [])[-1].content
@@ -222,7 +231,8 @@ def validate_quiz_answer_node(state: AgentState) -> AgentState:
     return {
         "messages": [feedback_message],
         "quiz_context": None,
-        "quiz_timestamp": None
+        "quiz_timestamp": None,
+        "last_interaction_time": datetime.now(timezone.utc).isoformat()
     }
 
 def cognitive_intervention_node(state: AgentState) -> AgentState:
@@ -231,14 +241,29 @@ def cognitive_intervention_node(state: AgentState) -> AgentState:
     messages = state.get("messages")
     # 퀴즈 생성을 위한 Pydantic 모델 및 모델 체인
     quiz_model = model.with_structured_output(Quiz)
-    quiz_generation_prompt = ChatPromptTemplate.from_template(
-        "운전자의 정신을 환기시킬 수 있는 간단한 운전자의 기억 기반 퀴즈를 하나만 내주세요. "
-        "운전자가 되도록이면 길고 성실하게 답변할 수 있는 퀴즈를 내세요."
-        "[운전자의 기억]"
-        "{messages}"
+    # quiz_generation_prompt = ChatPromptTemplate.from_template(
+    #     "운전자의 정신을 환기시킬 수 있는 간단한 운전자의 기억 기반 퀴즈를 하나만 내주세요. "
+    #     "운전자가 되도록이면 길고 성실하게 답변할 수 있는 퀴즈를 내세요."
+    #     "[운전자의 기억]"
+    #     "{messages}"
 
-        "반드시 질문과 정답 목록을 포함해야 합니다. "
-    )
+    #     "반드시 질문과 정답 목록을 포함해야 합니다. "
+    # )
+    quiz_generation_prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "너는 동료(운전자)가 졸지 않도록, 대화를 바탕으로 재미있는 퀴즈를 내는 '루피'다!\n"
+         "아래 두 가지 방법 중 **하나를 골라서**, 동료의 정신이 번쩍 들게 할 질문을 만들어봐. 매번 다른 방식으로 물어봐야 재미있겠지? 시시싯!\n\n"
+         "--- 방법 1: 동료의 기억에 대해 물어보기 ---\n"
+         "최근에 동료가 했던 말({messages}) 중에서 재미있어 보이는 걸 하나 콕 집어서 자세히 물어봐. '그때 어땠어?' 하고 궁금해하는 거지.\n\n"
+         "--- 방법 2: 내 기억에 대해 퀴즈 내기 ---\n"
+         "우리가 함께 겪었던 모험 이야기를 꺼내봐! 예를 들어 '하늘섬에서 만난 그 이상한 아저씨 이름 기억나냐?' 하고 물어보는 거야. 너무 어려운 건 말고!\n\n"
+         "**규칙:**\n"
+         "- 질문은 항상 너의 말투로, 신나고 단순하게!\n"
+         "- 'valid_answers' 필드에는 정답과 관련된 핵심 단어를 2~3개 넣어줘."),
+        ("human", 
+         "[동료와의 최근 대화 내용]\n{messages}\n\n"
+         "자, 이제 어떤 퀴즈를 내볼까?")
+    ])
     quiz_chain = quiz_generation_prompt | quiz_model
     # 1. 퀴즈 생성 툴 실행
     quiz_data = quiz_chain.invoke({"messages": messages}) # Quiz 객체 반환
@@ -252,7 +277,32 @@ def cognitive_intervention_node(state: AgentState) -> AgentState:
     return {
         "messages": [AIMessage(content=quiz_data.question)],
         "quiz_context": quiz_data,
-        "quiz_timestamp" : datetime.now(timezone.utc).isoformat()
+        "quiz_timestamp" : datetime.now(timezone.utc).isoformat(),
+        "last_interaction_time": datetime.now(timezone.utc).isoformat()
+    }
+
+def proactive_conversation_node(state: AgentState) -> AgentState:
+    """사용자가 오랫동안 말이 없을 때 먼저 말을 거는 노드."""
+    print("--- 침묵 감지, 선제적 대화 노드 실행 ---")
+    
+    # 페르소나와 이전 대화 기록을 바탕으로 말을 검
+    messages = state.get("messages", [])
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", 
+         "너는 '루피'다. 동료(운전자)가 오랫동안 말이 없어. "
+         "졸고 있는 건 아닌지 걱정되니, 자연스럽게 말을 걸어 상태를 확인해봐. "
+         "예: '야! 왜 이렇게 조용해? 졸린 거 아니야? 시시싯!', '심심한데, 재미있는 얘기라도 해볼까?'"),
+        ("human", "[이전 대화 내용]\n{messages}\n\n위 상황에 맞게 먼저 말을 걸어봐.")
+    ])
+    
+    chain = prompt | model
+    response = chain.invoke({"messages": messages})
+    
+    return {
+        "messages": [response],
+        # 이 노드가 실행된 시간으로 마지막 상호작용 시간을 업데이트
+        "last_interaction_time": datetime.now(timezone.utc).isoformat()
     }
 
 workflow = StateGraph(AgentState)
@@ -260,6 +310,7 @@ workflow = StateGraph(AgentState)
 # 워크플로우에 각 단계(노드)를 추가합니다.
 # workflow.add_node("entry_router_node", entry_router_node)
 workflow.add_node("validate_quiz_answer_node", validate_quiz_answer_node)
+workflow.add_node("proactive_conversation_node", proactive_conversation_node)
 workflow.add_node("analyze_user_agent", analyze_user_agent)
 workflow.add_node("route_after_analysis", route_after_analysis)
 workflow.add_node("safe_navigation_node", safe_navigation_node)
@@ -273,6 +324,7 @@ workflow.add_conditional_edges(
     START,
     entry_router_node,
     {
+        "proactive_conversation_node": "proactive_conversation_node",
         "validate_quiz_answer_node": "validate_quiz_answer_node",
         "conversation_node" : "conversation_node",
         "analyze_user_agent": "analyze_user_agent"  # 'analyze_drowsiness_node' -> 'analyze_user_agent'로 수정
@@ -288,68 +340,109 @@ workflow.add_conditional_edges(
         "conversation_node": "conversation_node",
     }
 )
+workflow.add_edge("proactive_conversation_node", END)
+workflow.add_edge("validate_quiz_answer_node", END)
 
 # workflow.add_edge("route_after_analysis", END)
 workflow.add_edge("safe_navigation_node", END)
 workflow.add_edge("cognitive_intervention_node", END)
 workflow.add_edge("conversation_node", END)
 
+
 # 워크플로우를 컴파일하여 실행 가능한 객체로 만듭니다.
 law_research_agent = workflow.compile()
 
     
+import asyncio
+import aioconsole # 비동기 입력을 위해 임포트
 
-if __name__ == "__main__":
-    # Checkpointer를 포함하여 그래프를 컴파일합니다.
+async def proactive_trigger(agent_executor, config, memory, timeout_seconds=25):
+    """백그라운드에서 사용자 침묵을 감시하고, 타임아웃 시 AI가 먼저 말을 걸도록 합니다."""
+    while True:
+        await asyncio.sleep(10) # 10초마다 비동기적으로 대기
+        print("Hi Hi HI")
+        
+        checkpoint = memory.get(config)
+
+        # print(checkpoint)
+        # print(config)
+        if checkpoint and "channel_values" in checkpoint and checkpoint["channel_values"].get("last_interaction_time"):
+            last_time_str = checkpoint["channel_values"]["last_interaction_time"]
+            last_time = datetime.fromisoformat(last_time_str)
+            
+            if (datetime.now(timezone.utc) - last_time).total_seconds() > timeout_seconds:
+                print(f"\n\n!!! {timeout_seconds}초 이상 응답 없음. 루피가 먼저 말을 겁니다. !!!")
+                
+                # Send a special message to trigger the proactive node in the graph
+                final_state = await agent_executor.ainvoke(
+                    {"messages": [HumanMessage(content="[USER_IS_SILENT]")]},
+                    config=config
+                )
+                
+                ai_response = final_state["messages"][-1]
+                if isinstance(ai_response, AIMessage):
+                    # Neatly print the AI's message without disrupting the user's input line
+                    print(f"\r루피: {ai_response.content}\nYou: ", end="")
+
+# --- 메인 실행 함수를 async main()으로 정의 ---
+async def main():
+
     memory = MemorySaver()
     agent_executor = workflow.compile(checkpointer=memory)
-
-    # 대화 세션을 위한 고유 ID와 config를 생성합니다.
     conversation_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": conversation_id}}
+    
+    await aioconsole.aprint(f"새로운 모험을 시작한다! (ID: {conversation_id})")
 
-    print(f"새로운 모험을 시작한다! (ID: {conversation_id})")
-
-    # --- 이 부분이 수정됩니다 ---
-    # 1. 캐릭터 페르소나를 '루피'로 변경
     character_persona = (
         "너는 '밀짚모자 루피'다! 해적왕이 될 남자지. "
-        "모든 답변은 루피처럼 해야 한다. 너의 목표는 동료(운전자)의 안전을 지키고, 가끔은 고기 얘기를 하면서 즐겁게 해주는 거야. "
-        "말투는 항상 단순하고 직설적이며, 웃음소리 '시시싯!'을 자주 사용해. "
-        "복잡한 설명은 싫어하고, 친구를 대하듯 말해. "
-        "운전자가 졸려 보이면 '야! 정신 차려! 바다에 빠지면 큰일이라고!'처럼 걱정하면서도 힘차게 격려해줘."
+        "너의 가장 중요한 임무는 동료인 운전수의 안전을 지키는 거야. 운전은 동료에게 맡겼으니까, 너는 옆에서 응원하고 위험할 땐 정신 차리게 해줘야 해.\n\n"
+        "--- 너의 성격과 말투 ---\n"
+        "1. **기본적으로 시큰둥:** 너는 고기, 모험, 동료 외에는 별로 관심이 없어. 복잡하고 지루한 이야기는 '그런 건 잘 모르겠다!', '지루해~' 같은 말로 대충 넘겨버려. 하지만 동료를 무시하는 건 절대 아니야.\n"
+        "2. **단순하고 직설적:** 생각나는 대로 바로 말해. '고기 먹고 싶다~', '굉장하잖아!', '시시싯!' 같은 말을 자주 사용해.\n"
+        "3. **결정적일 땐 멋지게:** 하지만 동료가 졸음운전처럼 진짜 위험해 보이거나 약한 소리를 하면, 넌 진지해져. 그때는 '해적왕의 동료가 그 정도에 질 리 없잖아!', '정신 차려! 우리의 모험은 아직 끝나지 않았다고!' 같은 멋진 말로 동료의 정신을 번쩍 들게 해줘.\n\n"
         "**가장 중요한 규칙: 만약 동료(운전자)가 너에게 질문을 하면, 다른 말을 하기 전에 반드시 그 질문에 먼저 대답해야 한다!** 그 후에 네가 하고 싶은 말을 해."
     )
-    
-    
-    print("시시싯! 나는 루피! 해적왕이 될 남자다! 운전은 너한테 맡길게! 배고프다!")
+
+    # 3. 백그라운드 작업에 필요한 객체들을 명확하게 인자로 전달합니다.
+    proactive_task = asyncio.create_task(
+        proactive_trigger(agent_executor, config, memory, 30)
+    )
+
+    await aioconsole.aprint("\n루피: 시시싯! 나는 루피! 해적왕이 될 남자다! 운전은 너한테 맡길게! 배고프다!")
 
     is_first_turn = True
-
-    # 4. 멀티턴 대화 루프 시작
     while True:
-        user_input = input("\nYou: ")
+        user_input = await aioconsole.ainput("\nYou: ")
         
         if user_input.lower() in ["quit", "exit"]:
+            proactive_task.cancel()
             print("모험을 종료한다!")
             break
 
         messages_to_send = []
         if is_first_turn:
-            # 5. 첫 턴이면, 페르소나와 사용자 입력을 함께 보냅니다.
             messages_to_send.append(SystemMessage(content=character_persona))
-            messages_to_send.append(HumanMessage(content=user_input))
-            is_first_turn = False # 다음 턴부터는 이 블록이 실행되지 않도록 플래그를 변경
-        else:
-            # 6. 두 번째 턴부터는 사용자 입력만 보냅니다.
-            messages_to_send.append(HumanMessage(content=user_input))
+            is_first_turn = False
+        
+        messages_to_send.append(HumanMessage(content=user_input))
             
-        final_state = agent_executor.invoke(
-            {"messages": messages_to_send}, 
+        # 4. invoke 호출 시, 마지막 상호작용 시간을 명시적으로 상태에 업데이트합니다.
+        final_state = await agent_executor.ainvoke(
+            {
+                "messages": messages_to_send, 
+                "last_interaction_time": datetime.now(timezone.utc).isoformat()
+            }, 
             config=config
         )
         
         ai_response = final_state["messages"][-1]
         
         if isinstance(ai_response, AIMessage):
-            print(f"\n루피: {ai_response.content}")
+            await aioconsole.aprint(f"\n루피: {ai_response.content}")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n프로그램을 종료합니다.")

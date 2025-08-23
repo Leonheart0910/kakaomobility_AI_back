@@ -82,6 +82,8 @@ class AgentState(TypedDict):
     quiz_timestamp: Optional[str] 
     quiz_context : str
 
+    last_interaction_time: Optional[str]
+
     # # 계산된 졸음 위험도 점수 (라우팅의 기준)
     # drowsiness_score: Optional[int]
     
