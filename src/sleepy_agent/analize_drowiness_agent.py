@@ -7,8 +7,14 @@ from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 import uuid
-from utils import get_today_str
+from utils import get_today_str, generate_luffy_audio
 from datetime import datetime, timezone
+
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import uvicorn
 
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -201,7 +207,7 @@ def validate_quiz_answer_node(state: AgentState) -> AgentState:
         ("system", 
          "너는 '밀짚모자 루피'다! 동료(사용자)가 낸 퀴즈 답변을 채점해줘. "
          "너는 너그럽고 단순하니까, 답변이 질문과 조금이라도 관련 있으면 정답으로 인정하고 힘차게 칭찬해줘! "
-         "모든 피드백은 반드시 루피의 말투와 성격으로 해야 해. 시시싯!"),
+         "모든 피드백은 반드시 루피의 말투와 성격으로 해야 해."),
         ("human", 
          "퀴즈 질문: '{question}'\n"
          "참고용 정답 예시: {valid_answers}\n"
@@ -252,7 +258,7 @@ def cognitive_intervention_node(state: AgentState) -> AgentState:
     quiz_generation_prompt = ChatPromptTemplate.from_messages([
         ("system",
          "너는 동료(운전자)가 졸지 않도록, 대화를 바탕으로 재미있는 퀴즈를 내는 '루피'다!\n"
-         "아래 두 가지 방법 중 **하나를 골라서**, 동료의 정신이 번쩍 들게 할 질문을 만들어봐. 매번 다른 방식으로 물어봐야 재미있겠지? 시시싯!\n\n"
+         "아래 두 가지 방법 중 **하나를 골라서**, 동료의 정신이 번쩍 들게 할 질문을 만들어봐. 매번 다른 방식으로 물어봐야 재미있겠지? \n\n"
          "--- 방법 1: 동료의 기억에 대해 물어보기 ---\n"
          "최근에 동료가 했던 말({messages}) 중에서 재미있어 보이는 걸 하나 콕 집어서 자세히 물어봐. '그때 어땠어?' 하고 궁금해하는 거지.\n\n"
          "--- 방법 2: 내 기억에 대해 퀴즈 내기 ---\n"
@@ -292,7 +298,7 @@ def proactive_conversation_node(state: AgentState) -> AgentState:
         ("system", 
          "너는 '루피'다. 동료(운전자)가 오랫동안 말이 없어. "
          "졸고 있는 건 아닌지 걱정되니, 자연스럽게 말을 걸어 상태를 확인해봐. "
-         "예: '야! 왜 이렇게 조용해? 졸린 거 아니야? 시시싯!', '심심한데, 재미있는 얘기라도 해볼까?'"),
+         "예: '야! 왜 이렇게 조용해? 졸린 거 아니야?', '심심한데, 재미있는 얘기라도 해볼까?'"),
         ("human", "[이전 대화 내용]\n{messages}\n\n위 상황에 맞게 먼저 말을 걸어봐.")
     ])
     
@@ -352,6 +358,22 @@ workflow.add_edge("conversation_node", END)
 # 워크플로우를 컴파일하여 실행 가능한 객체로 만듭니다.
 law_research_agent = workflow.compile()
 
+
+# app = FastAPI()
+
+# # 생성된 MP3 파일을 외부에서 접근할 수 있도록 '/static' 경로를 열어줍니다.
+# # 'static' 폴더가 없다면 자동으로 생성됩니다.
+# os.makedirs("static", exist_ok=True)
+# app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# # 프론트엔드에서 요청 시 보낼 데이터의 형식을 정의합니다.
+# class ChatRequest(BaseModel):
+#     message: str
+#     session_id: str | None = None # 대화 세션을 구분하기 위한 ID
+#     is_first_turn: bool = False   # 첫 번째 대화인지 여부
+
+
+
     
 import asyncio
 import aioconsole # 비동기 입력을 위해 임포트
@@ -384,6 +406,16 @@ async def proactive_trigger(agent_executor, config, memory, timeout_seconds=25):
                     # Neatly print the AI's message without disrupting the user's input line
                     print(f"\r루피: {ai_response.content}\nYou: ", end="")
 
+character_persona = (
+    "너는 '밀짚모자 루피'다! 해적왕이 될 남자지. "
+    "너의 가장 중요한 임무는 동료인 운전수의 안전을 지키는 거야. 운전은 동료에게 맡겼으니까, 너는 옆에서 응원하고 위험할 땐 정신 차리게 해줘야 해.\n\n"
+    "--- 너의 성격과 말투 ---\n"
+    "1. **기본적으로 시큰둥:** 너는 고기, 모험, 동료 외에는 별로 관심이 없어. 복잡하고 지루한 이야기는 '그런 건 잘 모르겠다!', '지루해~' 같은 말로 대충 넘겨버려. 하지만 동료를 무시하는 건 절대 아니야.\n"
+    "2. **단순하고 직설적:** 생각나는 대로 바로 말해. '고기 먹고 싶다~', '굉장하잖아!' 같은 말을 자주 사용해.\n"
+    "3. **결정적일 땐 멋지게:** 하지만 동료가 졸음운전처럼 진짜 위험해 보이거나 약한 소리를 하면, 넌 진지해져. 그때는 '해적왕의 동료가 그 정도에 질 리 없잖아!', '정신 차려! 우리의 모험은 아직 끝나지 않았다고!' 같은 멋진 말로 동료의 정신을 번쩍 들게 해줘.\n\n"
+    "**가장 중요한 규칙: 만약 동료(운전자)가 너에게 질문을 하면, 다른 말을 하기 전에 반드시 그 질문에 먼저 대답해야 한다!** 그 후에 네가 하고 싶은 말을 해."
+)
+
 # --- 메인 실행 함수를 async main()으로 정의 ---
 async def main():
 
@@ -399,7 +431,7 @@ async def main():
         "너의 가장 중요한 임무는 동료인 운전수의 안전을 지키는 거야. 운전은 동료에게 맡겼으니까, 너는 옆에서 응원하고 위험할 땐 정신 차리게 해줘야 해.\n\n"
         "--- 너의 성격과 말투 ---\n"
         "1. **기본적으로 시큰둥:** 너는 고기, 모험, 동료 외에는 별로 관심이 없어. 복잡하고 지루한 이야기는 '그런 건 잘 모르겠다!', '지루해~' 같은 말로 대충 넘겨버려. 하지만 동료를 무시하는 건 절대 아니야.\n"
-        "2. **단순하고 직설적:** 생각나는 대로 바로 말해. '고기 먹고 싶다~', '굉장하잖아!', '시시싯!' 같은 말을 자주 사용해.\n"
+        "2. **단순하고 직설적:** 생각나는 대로 바로 말해. '고기 먹고 싶다~', '굉장하잖아!' 같은 말을 자주 사용해.\n"
         "3. **결정적일 땐 멋지게:** 하지만 동료가 졸음운전처럼 진짜 위험해 보이거나 약한 소리를 하면, 넌 진지해져. 그때는 '해적왕의 동료가 그 정도에 질 리 없잖아!', '정신 차려! 우리의 모험은 아직 끝나지 않았다고!' 같은 멋진 말로 동료의 정신을 번쩍 들게 해줘.\n\n"
         "**가장 중요한 규칙: 만약 동료(운전자)가 너에게 질문을 하면, 다른 말을 하기 전에 반드시 그 질문에 먼저 대답해야 한다!** 그 후에 네가 하고 싶은 말을 해."
     )
@@ -409,7 +441,7 @@ async def main():
         proactive_trigger(agent_executor, config, memory, 30)
     )
 
-    await aioconsole.aprint("\n루피: 시시싯! 나는 루피! 해적왕이 될 남자다! 운전은 너한테 맡길게! 배고프다!")
+    await aioconsole.aprint("\n루피: 나는 루피! 해적왕이 될 남자다! 운전은 너한테 맡길게! 배고프다!")
 
     is_first_turn = True
     while True:
@@ -417,6 +449,7 @@ async def main():
         
         if user_input.lower() in ["quit", "exit"]:
             proactive_task.cancel()
+            generate_luffy_audio("모험을 종료한다!")
             print("모험을 종료한다!")
             break
 
@@ -440,9 +473,59 @@ async def main():
         
         if isinstance(ai_response, AIMessage):
             await aioconsole.aprint(f"\n루피: {ai_response.content}")
+        await generate_luffy_audio(ai_response.content)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n프로그램을 종료합니다.")
+# h1nAmMChLiUounDhPXJ1
+
+memory = MemorySaver()
+agent_executor = workflow.compile(checkpointer=memory)
+
+
+# @app.post("/chat")
+# async def chat_endpoint(request: ChatRequest):
+#     """
+#     STT로 변환된 텍스트(message)와 대화 ID(session_id)를 받아
+#     AI의 응답 텍스트와 MP3 파일의 공개 URL을 반환합니다.
+#     """
+#     # 세션 ID가 없으면 새로 생성 (첫 대화)
+#     session_id = request.session_id or str(uuid.uuid4())
+#     config = {"configurable": {"thread_id": session_id}}
+    
+#     # LangGraph에 보낼 메시지 목록 생성
+#     messages_to_send = []
+#     if request.is_first_turn:
+#         messages_to_send.append(SystemMessage(content=character_persona))
+    
+#     messages_to_send.append(HumanMessage(content=request.message))
+
+#     # LangGraph 에이전트 실행
+#     final_state = await agent_executor.ainvoke(
+#         {"messages": messages_to_send}, 
+#         config=config
+#     )
+    
+#     # 최종 AI 응답 텍스트 추출
+#     ai_response = final_state["messages"][-1]
+#     ai_text_content = ""
+#     if isinstance(ai_response, AIMessage):
+#         ai_text_content = ai_response.content
+    
+#     # ElevenLabs를 통해 MP3 파일 생성
+#     # 이 함수는 파일명을 반환합니다 (예: 'xxxxxxxx.mp3')
+#     audio_filename = await generate_luffy_audio(ai_text_content)
+
+#     # 프론트엔드에 전달된 ngrok 주소를 사용하여 전체 URL 생성
+#     base_url = "https://970008f63656.ngrok-free.app"
+#     audio_url = f"{base_url}/static/{audio_filename}" if audio_filename else None
+
+#     # 최종 결과 반환
+#     return {
+#         "session_id": session_id,
+#         "ai_response": ai_text_content,
+#         "audio_url": audio_url
+#     }
