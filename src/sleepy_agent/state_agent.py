@@ -61,6 +61,14 @@ class QuizValidationResult(BaseModel):
     feedback: str = Field(description="채점 결과에 따라 사용자에게 전달할 피드백 메시지")
     reasoning: str = Field(description="정답 또는 오답으로 판단한 이유")
 
+
+class UserIntent(BaseModel):
+    """사용자 발화의 의도를 파악하기 위한 스키마"""
+    is_question_to_ai: bool = Field(
+        description="사용자의 발화가 AI('너', '루피')에게 직접적으로 던지는 질문인지 여부."
+    )
+    reasoning: str = Field(description="그렇게 판단한 이유.")
+
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 

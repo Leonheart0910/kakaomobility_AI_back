@@ -1,7 +1,7 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 import os
-from sleepy_agent.state_agent import AgentState, LinguisticFatigueAnalysis, DrowinessScore, RoutingDecision, Quiz, QuizValidationResult
+from sleepy_agent.state_agent import AgentState, LinguisticFatigueAnalysis, DrowinessScore, RoutingDecision, Quiz, QuizValidationResult, UserIntent
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -13,13 +13,25 @@ from datetime import datetime, timezone
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
 model = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    # model="gemini-2.5-flash-lite-preview-06-17",
+    model = "gemini-2.5-flash",
     api_key=API_KEY,
-    temperature=0,
-    convert_system_message_to_human=True,
+    temperature=0.7,
+    # convert_system_message_to_human=True,
+)
+
+lite_model = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash-lite-preview-06-17",
+    api_key=API_KEY,
+    temperature=0.8,
+    # convert_system_message_to_human=True,
 )
 
 linguistic_fatigue_analysis_model = model.with_structured_output(LinguisticFatigueAnalysis)
+
+def answer_user_question(state: AgentState) -> AgentState:
+    
+    return {}
 
 def analyze_user_agent(state: AgentState) -> AgentState:
 
@@ -30,7 +42,10 @@ def analyze_user_agent(state: AgentState) -> AgentState:
         ("system", 
          "당신은 운전자의 발화를 듣고 피로도를 분석하는 전문가입니다. "
          "주어진 텍스트에서 관찰되는 언어적 특징과, 그것이 왜 피로의 신호인지 근거를 들어 분석하고, "
-         "제공된 LinguisticFatigueAnalysis 형식으로 출력하세요."),
+         "제공된 LinguisticFatigueAnalysis 형식으로 출력하세요."
+         "피로해보이지 않는다면 피로하지 않다고 작성하세요. "
+         "답변이 짧다고 해서 피로하다고 단정짓지 마세요. "
+         ),
         ("human", f"이 운전자의 발화를 분석해 주세요: '{user_text}'")
     ])
 
@@ -134,9 +149,10 @@ def conversation_node(state: AgentState) -> AgentState:
 
     # 2. LLM을 호출하여 다음 응답 생성
     response = model.invoke(messages)
+    print("response \n\n", response ,"\n\n")
     
     # 3. 생성된 응답을 messages에 추가하여 반환
-    return {"messages": [response]}
+    return {"messages": [AIMessage(content=response.content)]}
 
 def entry_router_node(state: AgentState):
     """그래프의 진입점에서 퀴즈 상황인지 일반 대화인지 판단하여 분기합니다."""
@@ -145,6 +161,22 @@ def entry_router_node(state: AgentState):
     if state.get("quiz_context"):
         print("--- 상태: 퀴즈 답변 처리 ---")
         return "validate_quiz_answer_node" # 퀴즈 검증 노드로 이동
+    
+    user_text = state.get("messages", [])[-1].content
+    
+    intent_prompt = ChatPromptTemplate.from_messages([
+        ("system", 
+         "당신은 사용자 발화의 의도를 분석하는 AI입니다. "
+         "사용자의 말이 '너', '너는', '루피' 등 AI 자신을 지칭하며 질문하는 형태인지 판단하세요."),
+        ("human", "다음 발화는 AI에게 직접 하는 질문입니까?: '{user_text}'")
+    ])
+    intent_classifier_model = lite_model.with_structured_output(UserIntent)
+    chain = intent_prompt | intent_classifier_model
+    intent_result = chain.invoke({"user_text": user_text})
+    
+    if intent_result.is_question_to_ai:
+        print(f"--- 상태: AI에게 질문 (이유: {intent_result.reasoning}) ---")
+        return "conversation_node" # 자연스러운 대화 노드로 이동
     else:
         print("--- 상태: 일반 대화 분석 ---")
         return "analyze_user_agent" # 기존 졸음 분석 노드로 이동
@@ -158,16 +190,14 @@ def validate_quiz_answer_node(state: AgentState) -> AgentState:
     validation_model = model.with_structured_output(QuizValidationResult)
     validation_prompt = ChatPromptTemplate.from_messages([
         ("system", 
-         "당신은 운전자의 퀴즈 답변을 너그럽게 채점하는 AI입니다. "
-         "사용자의 답변이 질문의 주제와 조금이라도 관련이 있다면 '정답'으로 인정해주세요. "
-         "운전자의 상태와 관계없이 단답형으로도 답변할 수 있으니 단답형 대답이나 간단한 답변도 정답으로 처리해야 합니다. "
-         "무성의한 답변은 오답처리가 가능합니다. "
-         "사용자의 답변이 기억을 떠올리려는 최소한의 노력만 보여도 정답입니다."),
+         "너는 '밀짚모자 루피'다! 동료(사용자)가 낸 퀴즈 답변을 채점해줘. "
+         "너는 너그럽고 단순하니까, 답변이 질문과 조금이라도 관련 있으면 정답으로 인정하고 힘차게 칭찬해줘! "
+         "모든 피드백은 반드시 루피의 말투와 성격으로 해야 해. 시시싯!"),
         ("human", 
          "퀴즈 질문: '{question}'\n"
          "참고용 정답 예시: {valid_answers}\n"
          "사용자 답변: '{user_answer}'\n\n"
-         "이 답변을 정답으로 처리할 수 있습니까? 결과에 맞는 피드백과 이유를 함께 알려주세요.")
+         "이 답변 어때? 정답으로 해줄까?")
     ])
     validation_chain = validation_prompt | validation_model
     
@@ -244,6 +274,7 @@ workflow.add_conditional_edges(
     entry_router_node,
     {
         "validate_quiz_answer_node": "validate_quiz_answer_node",
+        "conversation_node" : "conversation_node",
         "analyze_user_agent": "analyze_user_agent"  # 'analyze_drowsiness_node' -> 'analyze_user_agent'로 수정
     }
 )
@@ -269,34 +300,56 @@ law_research_agent = workflow.compile()
     
 
 if __name__ == "__main__":
-    # 1. 이 대화를 식별할 고유 ID를 생성합니다.
-    #    (실제 앱에서는 사용자 ID나 세션 ID를 사용할 수 있습니다.)
-
+    # Checkpointer를 포함하여 그래프를 컴파일합니다.
     memory = MemorySaver()
-
     agent_executor = workflow.compile(checkpointer=memory)
 
+    # 대화 세션을 위한 고유 ID와 config를 생성합니다.
     conversation_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": conversation_id}}
 
-    print(f"새로운 대화를 시작합니다. (ID: {conversation_id})")
+    print(f"새로운 모험을 시작한다! (ID: {conversation_id})")
+
+    # --- 이 부분이 수정됩니다 ---
+    # 1. 캐릭터 페르소나를 '루피'로 변경
+    character_persona = (
+        "너는 '밀짚모자 루피'다! 해적왕이 될 남자지. "
+        "모든 답변은 루피처럼 해야 한다. 너의 목표는 동료(운전자)의 안전을 지키고, 가끔은 고기 얘기를 하면서 즐겁게 해주는 거야. "
+        "말투는 항상 단순하고 직설적이며, 웃음소리 '시시싯!'을 자주 사용해. "
+        "복잡한 설명은 싫어하고, 친구를 대하듯 말해. "
+        "운전자가 졸려 보이면 '야! 정신 차려! 바다에 빠지면 큰일이라고!'처럼 걱정하면서도 힘차게 격려해줘."
+        "**가장 중요한 규칙: 만약 동료(운전자)가 너에게 질문을 하면, 다른 말을 하기 전에 반드시 그 질문에 먼저 대답해야 한다!** 그 후에 네가 하고 싶은 말을 해."
+    )
     
-    # 2. 'quit'이나 'exit'을 입력할 때까지 무한 루프를 실행합니다.
+    
+    print("시시싯! 나는 루피! 해적왕이 될 남자다! 운전은 너한테 맡길게! 배고프다!")
+
+    is_first_turn = True
+
+    # 4. 멀티턴 대화 루프 시작
     while True:
-        # 3. 사용자로부터 입력을 받습니다.
         user_input = input("\nYou: ")
         
         if user_input.lower() in ["quit", "exit"]:
-            print("대화를 종료합니다.")
+            print("모험을 종료한다!")
             break
+
+        messages_to_send = []
+        if is_first_turn:
+            # 5. 첫 턴이면, 페르소나와 사용자 입력을 함께 보냅니다.
+            messages_to_send.append(SystemMessage(content=character_persona))
+            messages_to_send.append(HumanMessage(content=user_input))
+            is_first_turn = False # 다음 턴부터는 이 블록이 실행되지 않도록 플래그를 변경
+        else:
+            # 6. 두 번째 턴부터는 사용자 입력만 보냅니다.
+            messages_to_send.append(HumanMessage(content=user_input))
             
-        # 4. 사용자의 입력을 HumanMessage로 변환하여 에이전트를 호출합니다.
-        #    checkpointer가 config의 thread_id를 보고 이전 대화 기록을 자동으로 불러옵니다.
         final_state = agent_executor.invoke(
-            {"messages": [HumanMessage(content=user_input)]}, 
+            {"messages": messages_to_send}, 
             config=config
         )
         
-        # 5. 에이전트의 마지막 응답을 추출하여 출력합니다.
-        ai_response = final_state["messages"][-1].content
-        print(f"\nAI: {ai_response}")
+        ai_response = final_state["messages"][-1]
+        
+        if isinstance(ai_response, AIMessage):
+            print(f"\n루피: {ai_response.content}")
