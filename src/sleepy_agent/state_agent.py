@@ -1,4 +1,4 @@
-from typing import Annotated, Dict, Any, TypedDict, Optional, List
+from typing import Annotated, Dict, Any, TypedDict, Optional, List, Literal
 from pydantic import BaseModel, Field
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, START, END
@@ -14,19 +14,6 @@ class DrivingContext(TypedDict):
     current_time_iso: str      # 현재 시간 (ISO 8601 형식)
     total_driving_minutes_today: int # 오늘 누적 운전 시간 (분)
 
-class AgentState(StateGraph):
-    messages: Annotated[list, add_messages]
-
-    stt_metadata: Dict[str, Any]
-    # 운전 맥락 정보
-    # driving_context: DrivingContext
-
-    # 계산된 졸음 위험도 점수 (라우팅의 기준)
-    drowsiness_score: Optional[int]
-    
-    # 졸음 점수를 산출한 근거 (디버깅 및 설명 용도)
-    analysis_rationale: Optional[str]
-
 
 class LinguisticFatigueAnalysis(BaseModel):
     """
@@ -39,3 +26,48 @@ class LinguisticFatigueAnalysis(BaseModel):
     reasoning: str = Field(
         description="위 언어적 특징들이 왜 피로의 신호가 되는지에 대한 논리적인 근거."
     )
+
+class DrowinessScore(BaseModel):
+    """
+    졸음 위험도 점수를 계산하기 위한 스키마입니다.
+    """
+    score: int = Field(
+        description="졸음 위험도 점수 (0 ~ 100)"
+    )
+    rationale: str = Field(
+        description="점수를 산출한 근거 (디버깅 및 설명 용도)"
+    )
+
+class RoutingDecision(BaseModel):
+    """
+    분석 결과를 바탕으로 다음에 실행할 노드를 결정하기 위한 스키마.
+    """
+    next_node: Literal["safe_navigation_node", "cognitive_intervention_node", "conversation_node"] = Field(
+        description="분석 결과에 따라 다음에 실행해야 할 노드의 이름."
+    )
+    rationale: str = Field(
+        description="그러한 결정을 내린 간단한 이유."
+    )
+
+class Quiz(BaseModel):
+    """퀴즈의 질문과 정답을 담는 스키마"""
+    question: str
+    valid_answers: List[str]
+
+
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+
+    stt_metadata: Dict[str, Any]
+    # 운전 맥락 정보
+    # driving_context: DrivingContext
+
+    # 언어적 특징 분석 결과
+    linguistic_fatigue_analysis: Optional[LinguisticFatigueAnalysis]
+
+    # # 계산된 졸음 위험도 점수 (라우팅의 기준)
+    # drowsiness_score: Optional[int]
+    
+    # # 졸음 점수를 산출한 근거 (디버깅 및 설명 용도)
+    # analysis_rationale: Optional[str]
+
