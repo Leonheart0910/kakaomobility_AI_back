@@ -55,6 +55,12 @@ class Quiz(BaseModel):
     valid_answers: List[str]
 
 
+class QuizValidationResult(BaseModel):
+    """퀴즈 답변의 정확도를 유연하게 판단하기 위한 스키마"""
+    is_correct: bool = Field(description="사용자의 답변이 정답으로 인정될 수 있는지 여부")
+    feedback: str = Field(description="채점 결과에 따라 사용자에게 전달할 피드백 메시지")
+    reasoning: str = Field(description="정답 또는 오답으로 판단한 이유")
+
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
@@ -64,6 +70,9 @@ class AgentState(TypedDict):
 
     # 언어적 특징 분석 결과
     linguistic_fatigue_analysis: Optional[LinguisticFatigueAnalysis]
+    
+    quiz_timestamp: Optional[str] 
+    quiz_context : str
 
     # # 계산된 졸음 위험도 점수 (라우팅의 기준)
     # drowsiness_score: Optional[int]
