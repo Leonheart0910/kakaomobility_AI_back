@@ -15,6 +15,7 @@ import uuid
 import os
 from elevenlabs.client import ElevenLabs # 변경점 1: 클라이언트를 import 합니다.
 from elevenlabs import Voice, VoiceSettings, save 
+from normalization import convert_numbers_in_string_to_korean
 
 load_dotenv()
 
@@ -42,7 +43,7 @@ async def generate_luffy_audio(text: str) -> str:
         audio_stream = client.text_to_speech.convert(
             voice_id=LUFFY_VOICE_ID,
             model_id=MODEL_ID,
-            text=text,
+            text=convert_numbers_in_string_to_korean(text),
             voice_settings=VOICE_SETTINGS,
             output_format="mp3_44100_128" # 필요 시 출력 포맷 지정
         )
